@@ -1,0 +1,10 @@
+data/raw/
+data/src/database/
+data/src/processed/*.parquet
+
+*.duckdb
+*.duckdb.wal
+*.parquet
+
+__pycache__/
+*.pyc
