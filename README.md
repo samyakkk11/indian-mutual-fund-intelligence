@@ -496,5 +496,5 @@ BE Information Technology — Data Science Honours
 
 Mumbai, India
 
-* [LinkedIn](#)
+* [LinkedIn](https://www.linkedin.com/in/samyak-prabhulkar-353363210/)
 * [GitHub](#)
