@@ -1,9 +1,10 @@
 # Indian Mutual Fund Intelligence
 
-An end-to-end analytics project: a compiled AMFI NAV dataset → DuckDB → validated analytical tables → a 4-page Power BI dashboard covering the Indian mutual fund market.
+An end-to-end data analytics project that transforms compiled **AMFI mutual fund NAV data** into validated analytical datasets and an interactive **Power BI dashboard** for analysing the Indian mutual fund market.
 
-**Stack:** Python · DuckDB · SQL (window functions) · Parquet · Power BI · DAX · Power Query (M)
-**Data through:** 05-Sep-2026 (static snapshot)
+The project covers data profiling, DuckDB-based modelling, SQL analytics, return and risk calculations, NAV anomaly detection, validation, Parquet exports, and Power BI visualisation.
+
+**Data through:** 05-Sep-2026 · Static snapshot
 **Analysed universe:** 1,737 Active Direct-Growth schemes · 52 AMCs
 
 ![Executive Overview](images/overview.png)
@@ -12,150 +13,253 @@ An end-to-end analytics project: a compiled AMFI NAV dataset → DuckDB → vali
 
 ## Contents
 
-1. [Objective](#objective)
+1. [Project Overview](#project-overview)
 2. [Dashboard](#dashboard)
-3. [Data source](#data-source)
-4. [Pipeline](#pipeline)
-5. [Metric definitions](#metric-definitions)
-6. [Data validation](#data-validation)
-7. [Power BI layer](#power-bi-layer)
-8. [Challenges and fixes](#challenges-and-fixes)
-9. [What I learned](#what-i-learned)
-10. [Known limitations](#known-limitations)
-11. [Reproduce](#reproduce)
-12. [Repository structure](#repository-structure)
-13. [Credits](#credits)
+3. [Technology Stack](#technology-stack)
+4. [Data Source](#data-source)
+5. [Pipeline](#pipeline)
+6. [Metric Definitions](#metric-definitions)
+7. [Data Validation](#data-validation)
+8. [Power BI Layer](#power-bi-layer)
+9. [Challenges and Fixes](#challenges-and-fixes)
+10. [Key Learnings](#key-learnings)
+11. [Known Limitations](#known-limitations)
+12. [Reproduce](#reproduce)
+13. [Repository Structure](#repository-structure)
+14. [Credits](#credits)
+15. [Author](#author)
 
 ---
 
-## Objective
+## Project Overview
 
-Answer practical questions about the Indian mutual fund market from raw NAV data:
+The objective was to build a reproducible analytics pipeline that answers practical questions about the Indian mutual fund market:
 
-- How is the fund universe structured across categories and AMCs?
-- How do return and risk compare across categories?
-- How does fund age limit what can be measured?
-- How does a single fund compare with its category over 1Y, 3Y and 5Y?
+* How is the fund universe distributed across categories and AMCs?
+* How do returns and risk differ across fund categories?
+* How does fund age affect the availability of performance metrics?
+* How does an individual fund compare with its category over 1Y, 3Y and 5Y?
+* Are abnormal NAV movements affecting return and risk calculations?
+* Can the entire analytical workflow be validated before the data reaches Power BI?
+
+The project intentionally separates **data preparation, analytical modelling, validation and visualisation** so that the Power BI layer is based on a controlled analytical dataset rather than raw NAV files.
 
 ---
 
 ## Dashboard
 
-| Page | What it shows |
-|---|---|
-| **Executive Overview** | Scheme and AMC counts, average 3Y CAGR, average maximum drawdown, schemes by fund age and category |
-| **Category & AMC Landscape** | Scheme mix by category, AMCs ranked by scheme count, top-10 AMC table with average 3Y CAGR |
-| **Performance & Risk** | Category return comparison, return-vs-volatility scatter, top schemes by return/volatility ratio, 3Y vs 5Y CAGR by category |
-| **Fund Explorer** | Single-fund profile: return, CAGR, volatility, drawdown, category rank, and fund-vs-category return by horizon |
+The Power BI report contains four analytical pages.
 
-| Category & AMC | Performance & Risk | Fund Explorer |
-|---|---|---|
-| ![](images/category_amc.png) | ![](images/performance_risk.png) | ![](images/fund_explorer.png) |
+| Page                         | What it shows                                                                                                         |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| **Executive Overview**       | Scheme and AMC counts, average 3Y CAGR, average maximum drawdown, schemes by fund age and category                    |
+| **Category & AMC Landscape** | Scheme distribution by category, AMC ranking by scheme count, and average 3Y CAGR                                     |
+| **Performance & Risk**       | Category return comparison, return-vs-volatility analysis, top schemes by return/volatility ratio, and 3Y vs 5Y CAGR  |
+| **Fund Explorer**            | Individual fund profile including returns, CAGR, volatility, drawdown, category rank, and fund-vs-category comparison |
+
+### Executive Overview
+
+![Executive Overview](images/overview.png)
+
+### Category & AMC Landscape
+
+![Category & AMC Landscape](images/category.png)
+
+### Performance & Risk
+
+![Performance & Risk](images/performance.png)
+
+### Fund Explorer
+
+![Fund Explorer](images/fund.png)
 
 ---
 
-## Data source
+## Technology Stack
 
-**Chain of origin:** AMFI official NAV files → compiled and enriched by the **MFPro NAV Master** (Amar Harolikar, TIGZIG) → this project.
+| Technology          | Purpose                                                             |
+| ------------------- | ------------------------------------------------------------------- |
+| **Python**          | Data preparation, profiling, validation and pipeline orchestration  |
+| **DuckDB**          | Analytical database and SQL processing                              |
+| **SQL**             | Window functions, returns, drawdowns, risk metrics and aggregations |
+| **Parquet**         | Efficient analytical data storage and Power BI input                |
+| **Power BI**        | Interactive dashboard and visual analytics                          |
+| **DAX**             | Dynamic measures and Fund Explorer calculations                     |
+| **Power Query (M)** | Data transformation and exclusion logic                             |
 
-| Item | Detail |
-|---|---|
-| Origin | AMFI (Association of Mutual Funds in India) official NAV files |
-| Compiled dataset | MFPro NAV Master: https://www.tigzig.com/mfpro/data-dictionary |
-| NAV history | `amfi_nav_master.parquet`: one row per scheme per day, April 2006 onward (`scheme_code`, `date`, `nav`, `scheme_name`, `isin`) |
-| Scheme master | `amfi_nav_master_latest.csv`: 38,194 rows × 22 columns; one row per scheme (identifiers, category, plan, option, dates, flags, latest quarterly AAUM, latest NAV) |
-| Source coverage | 38,000+ schemes (about 8,600 active), 71 AMCs, 37M+ NAV rows |
-| Obtained via | The dataset's public bulk-download endpoint |
-| This project | 2,875,293 NAV rows; 03-Apr-2006 to 05-Sep-2026 |
-| Terms | `[CHECK https://www.tigzig.com/terms and state the licence or attribution requirement here]` |
+---
 
-**How the universe was defined.** The scheme master lists about 38,000 rows because every fund is issued as separate Regular/Direct and Growth/IDCW/Bonus variants, each with its own `scheme_code`. Restricting to **Active + Direct + Growth** keeps one variant per fund and keeps returns comparable. Of 1,757 schemes that met the filter, **1,737 were analysed** after the exclusion described in [Data validation](#data-validation). Because one scheme code is one plan-and-option variant, scheme count here is close to a fund count.
+## Data Source
 
-**Field definitions** (from the MFPro data dictionary; these are derived fields added by the dataset's author, so their classification logic is inherited, not independently verified):
+### Chain of Origin
 
-| Field | Meaning |
-|---|---|
-| `is_active` | TRUE if the scheme published a NAV within the last 45 days |
-| `is_stale` | TRUE only for ~50 schemes with just 1 to 2 NAV rows in AMFI's records (data orphans). It does **not** mean an outdated NAV |
-| `category_group_clean` | Four groups: Equity, Debt, Hybrid, Other. Fund of Funds and Solution Oriented schemes sit under **Other** |
-| `scheme_plan` / `scheme_option` | Direct / Regular / Other, and Growth / IDCW / Bonus / Other, classified from the scheme name |
-| `aaum_cr_quarterly_avg` | Latest quarterly **average** AUM in ₹ crore, not point-in-time |
+**AMFI official NAV files → MFPro NAV Master → this project**
+
+The project uses the **MFPro NAV Master** compiled by Amar Harolikar (TIGZIG), which is derived from AMFI's official NAV files.
+
+| Item                   | Detail                                                                         |
+| ---------------------- | ------------------------------------------------------------------------------ |
+| **Origin**             | AMFI (Association of Mutual Funds in India) official NAV files                 |
+| **Compiled dataset**   | MFPro NAV Master                                                               |
+| **NAV history**        | `amfi_nav_master.parquet`                                                      |
+| **Scheme master**      | `amfi_nav_master_latest.csv`                                                   |
+| **Source coverage**    | 38,000+ schemes, approximately 8,600 active schemes, 71 AMCs and 37M+ NAV rows |
+| **Project NAV data**   | 2,875,293 NAV rows                                                             |
+| **Project date range** | 03-Apr-2006 to 05-Sep-2026                                                     |
+
+Source documentation:
+
+https://www.tigzig.com/mfpro/data-dictionary
+
+### Scheme Universe
+
+The source scheme master contains many variants of the same underlying fund because schemes are represented separately by plan and option, such as:
+
+* Regular / Direct
+* Growth / IDCW / Bonus
+
+The analytical universe is therefore restricted to:
+
+```text
+Active
++ Direct
++ Growth
+```
+
+This produces **1,757 eligible schemes** before NAV continuity validation.
+
+After excluding schemes affected by detected NAV discontinuities, **1,737 schemes** are included in the final analysis.
+
+Because one scheme code represents one plan-and-option variant, the scheme count is used as the analytical unit rather than attempting to consolidate multiple scheme variants into a single fund entity.
+
+### Important Source Fields
+
+The following fields are inherited from the MFPro dataset and their classification logic is therefore dependent on the source methodology.
+
+| Field                           | Meaning                                                                                                                 |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `is_active`                     | TRUE if the scheme published a NAV within the last 45 days                                                              |
+| `is_stale`                      | Identifies approximately 50 orphan schemes with only 1–2 NAV records; it does not mean that the current NAV is outdated |
+| `category_group_clean`          | Four broad groups: Equity, Debt, Hybrid and Other                                                                       |
+| `scheme_plan` / `scheme_option` | Plan and option classifications derived from scheme names                                                               |
+| `aaum_cr_quarterly_avg`         | Latest quarterly average AUM in ₹ crore                                                                                 |
 
 ---
 
 ## Pipeline
 
+```text
+NAV parquet ─────┐
+                 ├──► DuckDB ──► Validated Model ──► Fund Universe
+Scheme CSV ──────┘                                      │
+                                                        ▼
+                                               Daily Returns
+                                                        │
+                                                        ▼
+                                             NAV Discontinuity
+                                                  Detection
+                                                        │
+                                                        ▼
+                                              Analytics Tables
+                                                        │
+                                                        ▼
+                                              Parquet Exports
+                                                        │
+                                                        ▼
+                                                   Power BI
 ```
-NAV parquet ──┐
-              ├─► DuckDB ─► validated join ─► fund_universe ─► daily returns
-scheme CSV ───┘                                                   │
-                                                                  ▼
-Power BI ◄─ Parquet exports ◄─ analytics tables ◄─ discontinuity exclusion
-```
 
-| Step | Script | Purpose |
-|---|---|---|
-| 1 | `inspect_mf_data.py`, `inspect_scheme_master.py` | Profile raw files: shape, dtypes, nulls, duplicates, memory |
-| 2 | `build_model.py` | `nav_master` view (`TRY_CAST` NAV to `DECIMAL(18,4)`) and `scheme_master` table; `scheme_code` uniqueness check; NAV-to-scheme match check; index on `scheme_code` |
-| 3 | `profile_scheme_master.py` | Profile AMCs, plans, options, categories, active status |
-| 4 | `create_fund_universe.py` | Filter to `is_active = TRUE`, `scheme_plan = 'Direct'`, `scheme_option = 'Growth'` |
-| 5 | `create_daily_returns.py` | `fund_daily_returns`: daily return from `LAG(nav)` per scheme; null and non-positive NAVs removed first |
-| 6 | `flag_nav_discontinuities.py` | Detect ×10 / ×100 / ÷10 / ÷100 NAV breaks; write `nav_discontinuities` and `excluded_schemes` |
-| 7 | `run_analysis.py` | Builds a clean view excluding flagged schemes, then: performance summary, risk metrics, drawdowns, `fund_analytics`, annual and monthly returns, category and AMC summaries; exports Parquet |
-| 8 | `add_fund_age_tier.py` | Adds `fund_age_tier` (<1Y, 1-3Y, 3-5Y, 5Y+) |
-| 9 | `check_database.py`, `check_columns.py`, `check_nesting.py` | Validation checks |
+### Pipeline Steps
 
-**SQL techniques used:** `LAG()` for daily returns; running `MAX() OVER (... ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)` for drawdowns; correlated subqueries for the last NAV on or before each lookback date; `FIRST_VALUE`/`LAST_VALUE` for annual and monthly returns; CTE chains; `STDDEV_SAMP`.
+| Step | Script                                           | Purpose                                                                                                                       |
+| ---- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| 1    | `inspect_mf_data.py`, `inspect_scheme_master.py` | Profile raw files including shape, data types, nulls and duplicates                                                           |
+| 2    | `build_model.py`                                 | Build `nav_master` and `scheme_master`; validate scheme-code uniqueness and NAV-to-scheme matching                            |
+| 3    | `profile_scheme_master.py`                       | Analyse AMCs, plans, options, categories and active status                                                                    |
+| 4    | `create_fund_universe.py`                        | Filter to Active + Direct + Growth schemes                                                                                    |
+| 5    | `create_daily_returns.py`                        | Calculate daily returns using `LAG(nav)`                                                                                      |
+| 6    | `flag_nav_discontinuities.py`                    | Detect ×10, ×100, ÷10 and ÷100 NAV breaks                                                                                     |
+| 7    | `run_analysis.py`                                | Build clean analytical views, performance metrics, risk metrics, drawdowns, annual/monthly returns and category/AMC summaries |
+| 8    | `add_fund_age_tier.py`                           | Add `<1Y`, `1–3Y`, `3–5Y` and `5Y+` age tiers                                                                                 |
+| 9    | Validation scripts                               | Verify database structure, columns and missing-value nesting                                                                  |
 
----
+### SQL Techniques
 
-## Metric definitions
+The analytical layer uses SQL techniques including:
 
-| Metric | Definition |
-|---|---|
-| Daily return | `nav / previous_nav − 1` |
-| 1Y return | `latest NAV / NAV one year earlier − 1` (absolute, not annualised) |
-| 3Y / 5Y / 10Y CAGR | `(latest NAV / NAV n years earlier)^(1/n) − 1`, using the last available NAV on or before the lookback date |
-| Annualised volatility | `STDDEV_SAMP(daily_return) × √252` |
-| Downside deviation | `√AVG(daily_return² where daily_return < 0)` × √252 |
-| Maximum drawdown | `MIN(nav / running_peak − 1)` over full history |
-| Return/volatility ratio | Return divided by annualised volatility |
-| Fund age tier | Days from `first_date` to run date, banded at 1, 3 and 5 years |
+* `LAG()` for daily returns
+* Running `MAX() OVER (...)` for drawdown calculations
+* Correlated lookback queries for historical NAVs
+* `FIRST_VALUE()` and `LAST_VALUE()` for period returns
+* Common Table Expressions (CTEs)
+* `STDDEV_SAMP()` for volatility
+* Conditional aggregation
+* Window functions for ranking and analytical calculations
 
 ---
 
-## Data validation
+## Metric Definitions
 
-Validity was treated as part of the build.
+| Metric                      | Definition                                            |
+| --------------------------- | ----------------------------------------------------- |
+| **Daily Return**            | `NAV / Previous NAV − 1`                              |
+| **1Y Return**               | `Latest NAV / NAV one year earlier − 1`               |
+| **3Y CAGR**                 | `(Latest NAV / NAV three years earlier)^(1/3) − 1`    |
+| **5Y CAGR**                 | `(Latest NAV / NAV five years earlier)^(1/5) − 1`     |
+| **10Y CAGR**                | `(Latest NAV / NAV ten years earlier)^(1/10) − 1`     |
+| **Annualised Volatility**   | `STDDEV_SAMP(daily return) × √252`                    |
+| **Downside Deviation**      | `√AVG(daily return² where return < 0) × √252`         |
+| **Maximum Drawdown**        | Minimum of `NAV / Running Peak − 1`                   |
+| **Return/Volatility Ratio** | Return divided by annualised volatility               |
+| **Fund Age Tier**           | Fund age grouped into `<1Y`, `1–3Y`, `3–5Y` and `5Y+` |
 
-**Checks**
-
-- **Key uniqueness:** `scheme_code` duplicates in the scheme master
-- **Referential integrity:** every NAV row matched to the scheme master; unmatched rows counted
-- **Return hygiene:** null and non-positive NAVs removed before returns
-- **Missing-value nesting:** a fund with a 5Y CAGR must also have a 3Y CAGR and 1Y return (`check_nesting.py`, expects 0 violations)
-- **Age reconciliation:** funds without a 1Y return reconciled against the `<1Y` age tier (167 schemes)
-- **NAV continuity:** flags any single-day NAV ratio near ×10, ×100, ÷10 or ÷100
-- **Exclusion proof:** after `run_analysis.py`, the number of excluded schemes present in `fund_analytics` is asserted to be 0
-
-**What the continuity check found**
-
-| | |
-|---|---|
-| Break events | 21 |
-| Schemes affected | 20 of 1,757 (1.14%) |
-| Break types | 18 × ×100 schemes, plus one ÷100, one ×10 and one ÷10 event |
-| Fund types affected | Liquid, overnight, money market, ultra-short, short-term, corporate bond and gilt funds |
-| Treatment | Excluded from all return and risk metrics |
-| Result | 1,737 schemes analysed; 2,875,293 NAV rows |
-
-Examples: the ICICI Prudential Overnight Fund NAV moved from 116.47 to 1,164.89 on 17-Aug-2022 (exactly +900.14%); Navi Liquid Fund moved ×100 in September 2014 and ÷100 in November 2022. The pattern is consistent with face-value changes (₹10 → ₹1,000) not rebased in the NAV series. I could not determine whether the discontinuities originate in AMFI's own history or in the compiled dataset, so they are described as *present in the NAV series*.
+For CAGR calculations, the pipeline uses the last available NAV on or before the relevant historical lookback date.
 
 ---
 
-## Power BI layer
+## Data Validation
 
-**Power Query (M):** the model reads `investor_fund_dataset.parquet` from the processed folder, and a filter step drops the 20 flagged scheme codes.
+Data validation is treated as part of the analytical pipeline rather than as a separate manual step.
+
+### Validation Checks
+
+* **Key uniqueness:** checks for duplicate `scheme_code` values.
+* **Referential integrity:** verifies that NAV records can be matched to the scheme master.
+* **Return hygiene:** removes null and non-positive NAVs before calculating returns.
+* **Missing-value nesting:** a fund with a 5Y CAGR must also have a 3Y CAGR and 1Y return.
+* **Age reconciliation:** funds without a 1Y return are reconciled against the `<1Y` age tier.
+* **NAV continuity:** detects extreme NAV ratios around ×10, ×100, ÷10 and ÷100.
+* **Exclusion proof:** verifies that schemes identified as invalid are not included in the final analytical output.
+
+### NAV Continuity Findings
+
+| Metric                 |      Result |
+| ---------------------- | ----------: |
+| Break events           |          21 |
+| Schemes affected       | 20 of 1,757 |
+| Affected percentage    |       1.14% |
+| ×100 events            |          18 |
+| ÷100 events            |           1 |
+| ×10 events             |           1 |
+| ÷10 events             |           1 |
+| Final analysed schemes |       1,737 |
+| Final NAV rows         |   2,875,293 |
+
+The affected schemes included liquid, overnight, money market, ultra-short, short-term, corporate bond and gilt funds.
+
+The discontinuities were **excluded from return and risk analysis rather than silently rescaled**, because the underlying cause could not be independently verified.
+
+---
+
+## Power BI Layer
+
+The Power BI report consumes the processed analytical datasets generated by the Python/DuckDB pipeline.
+
+### Power Query
+
+The Power Query layer removes the 20 schemes identified by the NAV continuity analysis from the dataset used by the dashboard.
+
+Example:
 
 ```m
 ExcludeBadSchemes = Table.SelectRows(
@@ -169,7 +273,9 @@ ExcludeBadSchemes = Table.SelectRows(
 )
 ```
 
-**DAX (Fund Explorer horizon comparison):** fund and category-average return at 1Y, 3Y and 5Y, guarded so funds younger than the horizon return blank.
+### DAX
+
+The Fund Explorer dynamically compares a selected fund's performance with its category across different horizons.
 
 ```dax
 Fund CAGR by Horizon =
@@ -188,107 +294,207 @@ SWITCH (
 )
 ```
 
-`Category Avg CAGR by Horizon` uses the same logic inside `AVERAGEX` over the selected fund's category with `ALL(processed)` and a category filter. The 1Y point is an absolute return while 3Y and 5Y are CAGRs, and the chart is labelled accordingly.
+Explicit blank checks prevent funds younger than the selected horizon from appearing as `-100%`.
 
 ---
 
-## Challenges and fixes
+## Challenges and Fixes
 
-**1. An overnight fund with a 67.5% five-year CAGR.**
-The first build showed ICICI Prudential Overnight Fund as the top 5Y performer at 67.51%. An overnight fund cannot compound at that rate. Tracing it found a 10× NAV jump in one day; a universe-wide scan found 18 further schemes with ~99× jumps. I used a ratio-based detector (×10, ×100, ÷10, ÷100) rather than a blunt "large daily move" threshold, so genuine large moves are not swept out, and excluded affected schemes instead of rescaling them, since a rescale assumes a pure unit change with no real return on the break day. The same breaks would also have corrupted maximum drawdown (a ÷100 break registers as −99%) and volatility.
+### 1. An overnight fund appeared as the top 5Y performer
 
-**2. Stale paths after moving the project.**
-The project moved from a `C:` Desktop folder to an `A:` drive, breaking hard-coded paths in scripts and in the Power BI source. Scripts now derive paths from their own location, and the Power Query source was repointed.
+The initial build showed ICICI Prudential Overnight Fund with a 67.51% five-year CAGR.
 
-**3. Dashboard and pipeline out of sync.**
-After the pipeline was fixed, the file Power BI reads still held the old data (1,757 schemes, top 5Y CAGR 0.675), so a refresh would have succeeded and shown the same wrong numbers. I queried the parquet directly to confirm, then applied the exclusion in Power Query.
+Investigation revealed a large NAV discontinuity. A universe-wide scan identified additional ×100, ×10 and ÷10 movements.
 
-**4. A chart plotting −100% for young funds.**
-`POWER(BLANK, 1/5) − 1` evaluates to −1, because DAX treats the blank as zero. Every fund without a 5-year NAV appeared at −100%, and the category average inherited it. Fixed with explicit `ISBLANK` guards, so funds younger than the horizon are blank, and by storing decimals with percentage formatting to match every other metric.
+A ratio-based detector was therefore used instead of simply removing every large daily return. Affected schemes were excluded rather than automatically rescaled because rescaling assumes a specific unit-change explanation that could not be independently verified.
 
-**5. Reading the source correctly.**
-I first assumed `is_stale` meant an outdated NAV. The data dictionary showed it marks ~50 orphan schemes with 1 to 2 NAV rows, so the "Stale %" KPI I had planned would have been meaningless. Reading the dictionary also explained why the "Other Scheme" category performs so well: it holds gold, silver and overseas funds of funds.
+These anomalies could also distort:
 
-**6. Display details.**
-A card abbreviated 1,737 to "2K" (display-units setting), and category counts were re-checked against the post-exclusion universe.
+* Maximum drawdown
+* Volatility
+* CAGR
+* Other return-based metrics
+
+### 2. Hard-coded Windows paths
+
+The project was moved from a `C:` Desktop location to the `A:` drive.
+
+The original hard-coded paths caused scripts and Power BI sources to break.
+
+The Python pipeline was updated to derive paths from the project structure through `config.py`, making the scripts portable within the repository.
+
+### 3. Dashboard and pipeline were temporarily out of sync
+
+The Power BI source initially contained the older dataset even after the analytical pipeline had been corrected.
+
+The Parquet output was inspected directly and the Power Query layer was updated so that the dashboard used the validated universe.
+
+### 4. Young funds appeared with −100% CAGR
+
+DAX arithmetic involving blank historical NAV values could result in misleading `-100%` values.
+
+Explicit `ISBLANK()` checks were added before calculating 1Y, 3Y and 5Y returns.
+
+### 5. Misinterpretation of `is_stale`
+
+The `is_stale` field was initially interpreted as an indicator of an outdated NAV.
+
+The source data dictionary clarified that it identifies a small group of orphan schemes with only one or two NAV records.
+
+This prevented an inappropriate "Stale NAV %" KPI from being included in the dashboard.
+
+### 6. Dashboard display validation
+
+Several visual-level issues were identified during development, including:
+
+* KPI display units abbreviating 1,737 as `2K`
+* Category counts requiring reconciliation against the post-exclusion universe
+* Horizon metrics requiring explicit handling for younger funds
 
 ---
 
-## What I learned
+## Key Learnings
 
-- A pipeline that runs cleanly can still produce a wrong headline number. Asking "is this plausible for this fund type?" caught what no error message did.
-- Look at the shape of an anomaly first. Exact ratios of 10 and 100 point to unit changes, not noise, and "jumps and stays" needs a different treatment from "jumps and reverts".
-- Exclude and disclose rather than silently repair, when the cause can't be verified.
-- A successful refresh is not proof the data is right. Verify what the BI tool actually reads.
-- DAX treats blanks as zero in arithmetic; missing inputs need explicit guards.
-- Read the data dictionary before defining KPIs. Field names can mean something different from what they suggest.
-- Window functions carry most of the financial logic in SQL.
+* A pipeline can execute successfully while still producing an incorrect headline metric.
+* Financial data anomalies should be investigated for their structural pattern before applying generic outlier rules.
+* Exact NAV ratios can reveal potential unit or face-value changes.
+* When the cause of a data anomaly cannot be verified, exclusion and disclosure are safer than silent correction.
+* A successful Power BI refresh does not guarantee that the underlying dataset is correct.
+* Missing financial history must be explicitly handled in DAX.
+* Data dictionaries should be reviewed before defining business KPIs.
+* SQL window functions can carry a significant portion of financial analytics logic.
 
 ---
 
-## Known limitations
+## Known Limitations
 
-- **Static snapshot** through 05-Sep-2026; no scheduled refresh. A fresh download will differ
-- **Scope:** Direct-Growth only; Regular plans, IDCW and Bonus options excluded
-- **Survivorship bias:** only active schemes; matured and merged funds are absent, which skews averages upward
-- **Exclusion applied in Power Query.** The 20 flagged schemes are listed in `excluded_schemes` in the DuckDB build, but `investor_fund_dataset.parquet` still contains them and the filter is applied in the BI layer. Other exported Parquet files reflect the clean pipeline
-- **Point-to-point returns:** no benchmark or risk-free rate, so no alpha, beta, tracking error or Sharpe ratio
-- **Mixed definitions:** the Fund Explorer compares a 1Y absolute return with 3Y/5Y CAGRs
-- **"Other Scheme" is not an asset class.** It holds Fund of Funds (gold, silver, international) and Solution Oriented funds, so its average CAGR reflects those strong-performing segments
-- **Category framework in transition:** SEBI reissued categories on 26-Feb-2026 and fund houses were re-filing through August 2026, so sub-category names mix old and new; analysis uses the four-group field only
-- **Return/volatility ratio** is inflated for very low-volatility funds (arbitrage, short duration)
-- **Blank CAGR** means the fund is younger than the lookback, not missing data
-- Volatility annualised on a 252-day convention; AAUM is a quarterly average, not point-in-time; fund age tiers use the run date, so boundary cases can shift
+* **Static snapshot:** data is available through 05-Sep-2026 and there is no scheduled refresh.
+* **Scope:** analysis is restricted to Active Direct-Growth schemes. Regular plans, IDCW and Bonus options are excluded.
+* **Survivorship bias:** only active schemes are included; matured and merged funds are absent.
+* **NAV discontinuity exclusions:** 20 schemes are excluded from the dashboard's return and risk analysis.
+* **Point-to-point returns:** no benchmark or risk-free rate is used, so alpha, beta, tracking error and Sharpe ratio are not calculated.
+* **Mixed return definitions:** Fund Explorer compares a 1Y absolute return with 3Y and 5Y CAGRs.
+* **Other category:** the `Other` group includes Fund of Funds and Solution Oriented schemes and therefore should not be interpreted as a single asset class.
+* **Category framework:** category definitions are represented through the four broad groups available in the source dataset.
+* **Return/volatility ratio:** the ratio can be inflated for extremely low-volatility funds.
+* **Blank CAGR:** a blank CAGR indicates insufficient historical data for the selected horizon rather than necessarily missing data.
+* **Annualisation convention:** volatility uses a 252-trading-day convention.
+* **AAUM:** AUM is represented using the latest quarterly average available in the source data rather than a point-in-time value.
+* **Fund age:** age tiers are calculated relative to the pipeline run date, so boundary cases can change over time.
 
 ---
 
 ## Reproduce
 
+### Requirements
+
 ```bash
 pip install duckdb pandas pyarrow
 ```
 
-1. Download the two source files (see [Data source](#data-source)) into `data/raw/`
-2. Run in order:
+### 1. Add source data
 
-```bash
-python build_model.py
-python create_fund_universe.py
-python create_daily_returns.py
-python flag_nav_discontinuities.py
-python run_analysis.py
-python add_fund_age_tier.py
-python check_nesting.py
+Place the required source files in:
+
+```text
+data/raw/
 ```
 
-3. Open the `.pbix` and point the Power Query source at `data/src/processed/`
+Expected files:
 
-Some scripts still contain absolute Windows paths and need editing for your folder.
+```text
+amfi_nav_master.parquet
+amfi_nav_master_latest.csv
+```
+
+The source dataset is described in the [Data Source](#data-source) section.
+
+### 2. Run the pipeline
+
+From the project root:
+
+```bash
+python data/src/scripts/build_model.py
+python data/src/scripts/create_fund_universe.py
+python data/src/scripts/create_daily_returns.py
+python data/src/scripts/flag_nav_discontinuities.py
+python data/src/scripts/run_analysis.py
+python data/src/scripts/add_fund_age_tier.py
+python data/src/scripts/check_nesting.py
+```
+
+Additional inspection and validation scripts are available in:
+
+```text
+data/src/scripts/
+```
+
+### 3. Power BI
+
+Open:
+
+```text
+Mf_Dashboard.pbix
+```
+
+The analytical Parquet outputs are generated under:
+
+```text
+data/src/processed/
+```
+
+The raw source files, DuckDB database and generated Parquet datasets are excluded from version control through `.gitignore`.
 
 ---
 
-## Repository structure
+## Repository Structure
 
-```
+```text
+indian-mutual-fund-intelligence/
+│
 ├── data/
-│   ├── raw/                 # NAV parquet, scheme master CSV
 │   └── src/
-│       ├── database/        # mutual_funds.duckdb
-│       └── processed/       # analytics parquet files for Power BI
-├── scripts/                 # pipeline and validation scripts
-├── images/                  # dashboard screenshots
-└── README.md
+│       ├── scripts/            # Python pipeline and validation scripts
+│       ├── database/           # Local DuckDB database
+│       └── processed/          # Generated analytical Parquet files
+│
+├── icons/                      # Dashboard icons
+├── images/                     # Dashboard screenshots
+│   ├── overview.png
+│   ├── category.png
+│   ├── performance.png
+│   └── fund.png
+│
+├── Mf_Dashboard.pbix           # Power BI dashboard
+├── README.md
+└── .gitignore
 ```
+
+Raw source files and generated analytical data are intentionally excluded from the Git repository.
 
 ---
 
 ## Credits
 
-Data: **MFPro NAV Master** by Amar Harolikar (TIGZIG), compiled from AMFI's official files: https://www.tigzig.com/mfpro/data-dictionary
+### Data
+
+**MFPro NAV Master** by Amar Harolikar (TIGZIG), compiled from AMFI's official NAV files.
+
+Source documentation:
+
+https://www.tigzig.com/mfpro/data-dictionary
+
+The project uses the compiled dataset for analytical processing and attributes the underlying NAV data source to AMFI.
 
 ---
 
 ## Author
 
-**Samyak Prabhulkar**: BE Information Technology (Data Science honours), Mumbai
-[LinkedIn](#) · [GitHub](#)
+**Samyak Prabhulkar**
+
+BE Information Technology — Data Science Honours
+
+Mumbai, India
+
+* [LinkedIn](#)
+* [GitHub](#)
